@@ -1,19 +1,20 @@
 #!/bin/bash
 
 #
+# Source:   https://gist.github.com/bsdcon/7224196
 # Original: https://gist.github.com/habibutsu/5420781
 # Modified by Adrian Penisoara  << ady+tailurl (at) bsdconsultants.com >>
 #
 
 usage() {
-    echo "Usage: $0 [ -u <username> [ -p <password> ]] [-{f|F} [-s <sleep interval> ]] <url to monitor>"
+    echo "Usage: $0 [ -u <username> [ -p <password> ]] [-{f|F} [-s <sleep interval> ] [ -t <interval> ]] <url to monitor>"
     exit 1
 }
 
 curl_error() {
     if [ "$1" -ne 0 ]; then
         echo "CURL exited with error code $1 -- aborting" >&2
-        exit $1
+        exit $2
     fi
 }
 
@@ -35,29 +36,32 @@ EOF
 
 follow=NO
 retry=NO
-sleep=1
-while getopts ":fFu:p:s:" arg; do
+sleep=${TAILURL_SLEEP:-1}
+while getopts ":fFu:p:s:t:" arg; do
   case $arg in
      f) follow=YES
         ;;
-        
+
      F) follow=YES
         retry=YES
         ;;
-        
+
      u) user=$OPTARG
         ;;
-        
+
      p) if [ -z "$user" ]; then
             echo "Error: password argument requires user being set"
             usage
         fi
         pass=$OPTARG
         ;;
-        
+
      s) sleep=$OPTARG
         ;;
-        
+
+     t) tstamp=$OPTARG
+        ;;
+
      *) echo "Syntax error"
         usage
         ;;
@@ -100,6 +104,8 @@ if [ $START_SIZE -lt 0 ]; then
     START_SIZE=0
 fi
 
+# idle cycles counter
+icounter=0
 while [ true ]
 do
     STATUS=$($CURL_CMD -I --range $START_SIZE-) || curl_error $?
@@ -109,6 +115,7 @@ do
         SIZE=$(expr $START_SIZE + $CONTENT_LENGTH)
         $CURL_CMD --range $START_SIZE-$SIZE || curl_error $?
         START_SIZE=$SIZE
+        icounter=0
     elif [ "${STATUS_CODE:0:3}" = "416" ]; then
         if [ $retry = YES ]; then
             STATUS=$($CURL_CMD -I) || curl_error $?
@@ -123,5 +130,13 @@ do
         http_error "Resource no longer reachable" "$STATUS"
     fi
     [ $follow = YES ] || break
+
+    if [ -n "$tstamp" -a $icounter -ge $tstamp ]; then
+        printf "\n[ $(date) ]\n\n" >&2
+        # Disable counter until next update
+        icounter=-1
+    fi
+
     sleep $sleep
+    [ $icounter -ge 0 ] && icounter=$(expr $icounter + 1)
 done
